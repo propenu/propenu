@@ -24,5 +24,5 @@ jobs:
         cache: 'npm'
     - run: npm ci
     - run: | 
-            touch .env echo "${{secreats.PROPENU_ENV}}" >.env
+            touch .env echo "${{secrets.PROPENU_ENV}}" >.env
 
