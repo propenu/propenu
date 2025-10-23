@@ -1,28 +1,77 @@
-# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
-
-name: Node.js CI/CD
-
+name: Backend CI/CD
 on:
   push:
-    branches: [ "deploy" ]
-  
+    branches: ["deploy"]
+    paths:
+      - "backend/**"          # only run when backend changes
+      - ".github/workflows/**"
+
 jobs:
   build:
     runs-on: self-hosted
+
     strategy:
       matrix:
         node-version: [18.x]
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-    - run: npm ci
-    - run: | 
-            touch .env echo "${{secrets.PROPENU_ENV}}" > .env
+      - name: Checkout
+        uses: actions/checkout@v4
 
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          # point cache at ALL the lockfiles you install from
+          cache-dependency-path: |
+            backend/gateway/package-lock.json
+            backend/services/auth-service/package-lock.json
+            backend/services/payment-service/package-lock.json
+            backend/services/property-service/package-lock.json
+            backend/services/user-service/package-lock.json
+
+      # ====== GATEWAY ======
+      - name: Install gateway deps (prod only)
+        working-directory: backend/gateway
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Create gateway .env
+        if: secrets.PROPENU_ENV != ''
+        working-directory: backend/gateway
+        run: |
+          printf "%s" "${{ secrets.PROPENU_ENV }}" > .env
+
+      - name: Build gateway (if TS or has build script)
+        working-directory: backend/gateway
+        run: |
+          if npm run | grep -q " build"; then npm run build; fi
+
+      # ====== SERVICES (repeat per service you deploy) ======
+      - name: Install auth deps (prod only)
+        working-directory: backend/services/auth
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Install user deps (prod only)
+        working-directory: backend/services/user
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Install payment deps (prod only)
+        working-directory: backend/services/payment
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Install property deps (prod only)
+        working-directory: backend/services/property
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      # (Optional) Build each service if they have a build step
+      - name: Build services (if needed)
+        shell: bash
+        run: |
+          for dir in backend/services/*; do
+            if [ -f "$dir/package.json" ] && (cd "$dir" && npm run | grep -q " build"); then
+              (cd "$dir" && npm run build)
+            fi
+          done
+
+      # From here you can add your deploy/restart steps (pm2, ssh, etc.)
