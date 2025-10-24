@@ -5,15 +5,12 @@ on:
     branches: ["deploy"]
     paths:
       - "backend/**"
-      - ".github/workflows/**"
 
 jobs:
   build:
     runs-on: self-hosted
     env:
-      # Map secret to env so we can reference it in steps/if:
       PROPENU_ENV: ${{ secrets.PROPENU_ENV }}
-
     strategy:
       matrix:
         node-version: [18.x]
@@ -27,17 +24,26 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+          # ✅ match your real paths (or use the single-glob below)
           cache-dependency-path: |
             backend/gateway/package-lock.json
-            backend/services/auth/package-lock.json
-            backend/services/user/package-lock.json
-            backend/services/payment/package-lock.json
-            backend/services/property/package-lock.json
+            backend/services/auth-service/package-lock.json
+            backend/services/user-service/package-lock.json
+            backend/services/payment-service/package-lock.json
+            backend/services/property-service/package-lock.json
+
+      - name: Debug – show lockfiles (helps if cache fails)
+        run: |
+          ls -la backend/gateway || true
+          ls -la backend/services/auth-service || true
+          ls -la backend/services/user-service || true
+          ls -la backend/services/payment-service || true
+          ls -la backend/services/property-service || true
 
       # ====== GATEWAY ======
-      - name: Install gateway deps (prod only)
+      - name: Install gateway deps (with dev for build)
         working-directory: backend/gateway
-        run: npm ci --omit=dev --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Create gateway .env (if provided)
         if: ${{ env.PROPENU_ENV != '' }}
@@ -50,31 +56,43 @@ jobs:
         working-directory: backend/gateway
         shell: bash
         run: |
-          if npm run | grep -qE '(^|\s)build(\s|:)'; then npm run build; fi
+          if npm run | grep -qE '(^|\s)build(\s|:)'; then npm run build; else echo "No build script"; fi
+
+      - name: Prune gateway dev deps for deploy artifacts (optional)
+        working-directory: backend/gateway
+        run: npm prune --omit=dev
 
       # ====== SERVICES ======
-      - name: Install auth deps (prod only)
-        working-directory: backend/services/auth
-        run: npm ci --omit=dev --no-audit --no-fund
-
-      - name: Install user deps (prod only)
-        working-directory: backend/services/user
-        run: npm ci --omit=dev --no-audit --no-fund
-
-      - name: Install payment deps (prod only)
-        working-directory: backend/services/payment
-        run: npm ci --omit=dev --no-audit --no-fund
-
-      - name: Install property deps (prod only)
-        working-directory: backend/services/property
-        run: npm ci --omit=dev --no-audit --no-fund
-
-      # Optional: build each service if they define a build script
-      - name: Build services (if needed)
+      - name: Install service deps (with dev for build)
         shell: bash
         run: |
-          for dir in backend/services/*; do
-            if [ -f "$dir/package.json" ] && (cd "$dir" && npm run | grep -qE '(^|\s)build(\s|:)'); then
-              (cd "$dir" && npm run build)
+          for dir in backend/services/*-service; do
+            if [ -f "$dir/package.json" ]; then
+              echo "Installing deps in $dir"
+              (cd "$dir" && npm ci --no-audit --no-fund)
+            fi
+          done
+
+      - name: Build services (if build script exists)
+        shell: bash
+        run: |
+          for dir in backend/services/*-service; do
+            if [ -f "$dir/package.json" ]; then
+              if (cd "$dir" && npm run | grep -qE '(^|\s)build(\s|:)'); then
+                echo "Building $dir"
+                (cd "$dir" && npm run build)
+              else
+                echo "No build script in $dir"
+              fi
+            fi
+          done
+
+      - name: Prune service dev deps (optional)
+        shell: bash
+        run: |
+          for dir in backend/services/*-service; do
+            if [ -f "$dir/package.json" ]; then
+              echo "Pruning dev deps in $dir"
+              (cd "$dir" && npm prune --omit=dev)
             fi
           done
