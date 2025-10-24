@@ -1,5 +1,4 @@
 name: Backend CI/CD
-
 on:
   push:
     branches: ["deploy"]
@@ -24,21 +23,15 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-          # ✅ match your real paths (or use the single-glob below)
           cache-dependency-path: |
+            package-lock.json
             backend/gateway/package-lock.json
-            backend/services/auth-service/package-lock.json
-            backend/services/user-service/package-lock.json
-            backend/services/payment-service/package-lock.json
-            backend/services/property-service/package-lock.json
+            backend/services/*-service/package-lock.json
 
-      - name: Debug – show lockfiles (helps if cache fails)
+      - name: Debug lockfiles (optional)
         run: |
-          ls -la backend/gateway || true
-          ls -la backend/services/auth-service || true
-          ls -la backend/services/user-service || true
-          ls -la backend/services/payment-service || true
-          ls -la backend/services/property-service || true
+          echo "Lockfiles the runner sees:"
+          find . -name package-lock.json
 
       # ====== GATEWAY ======
       - name: Install gateway deps (with dev for build)
@@ -48,51 +41,41 @@ jobs:
       - name: Create gateway .env (if provided)
         if: ${{ env.PROPENU_ENV != '' }}
         working-directory: backend/gateway
-        shell: bash
-        run: |
-          printf "%s" "${PROPENU_ENV}" > .env
+        run: printf "%s" "${PROPENU_ENV}" > .env
 
       - name: Build gateway (if script exists)
         working-directory: backend/gateway
-        shell: bash
         run: |
           if npm run | grep -qE '(^|\s)build(\s|:)'; then npm run build; else echo "No build script"; fi
 
-      - name: Prune gateway dev deps for deploy artifacts (optional)
+      - name: Prune gateway dev deps (optional)
         working-directory: backend/gateway
         run: npm prune --omit=dev
 
       # ====== SERVICES ======
       - name: Install service deps (with dev for build)
-        shell: bash
         run: |
           for dir in backend/services/*-service; do
-            if [ -f "$dir/package.json" ]; then
-              echo "Installing deps in $dir"
-              (cd "$dir" && npm ci --no-audit --no-fund)
-            fi
+            [ -f "$dir/package.json" ] || continue
+            echo "Installing deps in $dir"
+            (cd "$dir" && npm ci --no-audit --no-fund)
           done
 
       - name: Build services (if build script exists)
-        shell: bash
         run: |
           for dir in backend/services/*-service; do
-            if [ -f "$dir/package.json" ]; then
-              if (cd "$dir" && npm run | grep -qE '(^|\s)build(\s|:)'); then
-                echo "Building $dir"
-                (cd "$dir" && npm run build)
-              else
-                echo "No build script in $dir"
-              fi
+            [ -f "$dir/package.json" ] || continue
+            if (cd "$dir" && npm run | grep -qE '(^|\s)build(\s|:)'); then
+              echo "Building $dir"
+              (cd "$dir" && npm run build)
+            else
+              echo "No build script in $dir"
             fi
           done
 
       - name: Prune service dev deps (optional)
-        shell: bash
         run: |
           for dir in backend/services/*-service; do
-            if [ -f "$dir/package.json" ]; then
-              echo "Pruning dev deps in $dir"
-              (cd "$dir" && npm prune --omit=dev)
-            fi
+            [ -f "$dir/package.json" ] || continue
+            (cd "$dir" && npm prune --omit=dev)
           done
