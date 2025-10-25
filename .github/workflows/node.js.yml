@@ -1,4 +1,4 @@
-name: Backend CI/CD
+name: Backend CI/CD 🚀
 
 on:
   push:
@@ -11,6 +11,7 @@ on:
       - "backend/**"
   workflow_dispatch:
 
+# Prevent overlapping deploy runs
 concurrency:
   group: backend-cicd-${{ github.ref }}
   cancel-in-progress: true
@@ -18,10 +19,11 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: self-hosted
+
     env:
-      # Gateway env (create this secret or rename to yours)
+      # Gateway env
       PRPPENU_GATEWAY_ENV: ${{ secrets.PRPPENU_GATEWAY_ENV }}
-      # Service envs you already created
+      # Service envs (stored in GitHub Secrets)
       PRPPENU_AUTH_ENV: ${{ secrets.PRPPENU_AUTH_ENV }}
       PRPPENU_PAYMENT_ENV: ${{ secrets.PRPPENU_PAYMENT_ENV }}
       PRPPENU_PROPERTY_ENV: ${{ secrets.PRPPENU_PROPERTY_ENV }}
@@ -36,12 +38,13 @@ jobs:
         node-version: [18.x]
 
     steps:
-      - name: Checkout
+      # ----------------- 📥 Checkout -----------------
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
@@ -51,39 +54,43 @@ jobs:
             backend/gateway/package-lock.json
             backend/services/*-service/package-lock.json
 
-      - name: Show working dir (debug)
+      - name: Debug working directory
         run: |
+          echo "Current directory:"
           pwd
+          echo "List of files:"
           ls -la
 
-      # -------- Write .env files (from GitHub Secrets) --------
-      - name: Write gateway .env
+      # ----------------- 🧪 Write .env files -----------------
+      - name: Write gateway .env from secrets
         if: ${{ env.PRPPENU_GATEWAY_ENV != '' }}
         working-directory: backend/gateway
-        run: printf "%s" "${PRPPENU_GATEWAY_ENV}" > .env
+        run: |
+          echo "Creating .env for gateway"
+          printf "%s" "${PRPPENU_GATEWAY_ENV}" > .env
 
-      - name: Write service .env files
+      - name: Write service .env files from secrets
         run: |
           set -e
-          # auth
           if [ -n "${PRPPENU_AUTH_ENV}" ]; then
+            echo "Creating .env for auth-service"
             printf "%s" "${PRPPENU_AUTH_ENV}" > backend/services/auth-service/.env
           fi
-          # payment
           if [ -n "${PRPPENU_PAYMENT_ENV}" ]; then
+            echo "Creating .env for payment-service"
             printf "%s" "${PRPPENU_PAYMENT_ENV}" > backend/services/payment-service/.env
           fi
-          # property
           if [ -n "${PRPPENU_PROPERTY_ENV}" ]; then
+            echo "Creating .env for property-service"
             printf "%s" "${PRPPENU_PROPERTY_ENV}" > backend/services/property-service/.env
           fi
-          # user
           if [ -n "${PRPPENU_USER_ENV}" ]; then
+            echo "Creating .env for user-service"
             printf "%s" "${PRPPENU_USER_ENV}" > backend/services/user-service/.env
           fi
 
-      # -------- Install & build (gateway) --------
-      - name: Install gateway deps (with dev for build)
+      # ----------------- 📦 Install & Build Gateway -----------------
+      - name: Install gateway dependencies
         working-directory: backend/gateway
         run: npm ci --no-audit --no-fund
 
@@ -93,23 +100,23 @@ jobs:
           if npm run | grep -qE '(^|\s)build(\s|:)'; then
             npm run build
           else
-            echo "No build script"
+            echo "⚠️ No build script found for gateway."
           fi
 
-      - name: Prune gateway dev deps
+      - name: Prune gateway dev dependencies
         working-directory: backend/gateway
         run: npm prune --omit=dev
 
-      # -------- Install & build (services) --------
-      - name: Install service deps (with dev for build)
+      # ----------------- 🧰 Install & Build Services -----------------
+      - name: Install service dependencies
         run: |
           shopt -s nullglob
           for dir in backend/services/*-service; do
-            echo "Installing deps in $dir"
+            echo "Installing dependencies in $dir"
             (cd "$dir" && npm ci --no-audit --no-fund)
           done
 
-      - name: Build services (if build script exists)
+      - name: Build services (if script exists)
         run: |
           shopt -s nullglob
           for dir in backend/services/*-service; do
@@ -117,34 +124,33 @@ jobs:
               echo "Building $dir"
               (cd "$dir" && npm run build)
             else
-              echo "No build script in $dir"
+              echo "⚠️ No build script in $dir"
             fi
           done
 
-      - name: Prune service dev deps
+      - name: Prune service dev dependencies
         run: |
           shopt -s nullglob
           for dir in backend/services/*-service; do
             (cd "$dir" && npm prune --omit=dev)
           done
 
-      # -------- Deploy: reload PM2 --------
+      # ----------------- 🚀 Deploy with PM2 -----------------
       - name: Reload PM2 apps
         working-directory: backend
         run: |
-          # ecosystem.config.cjs should define gateway + all services
-          if pm2 -v >/dev/null 2>&1; then
-            # Start or reload based on ecosystem file
-            if [ -f ecosystem.config.cjs ]; then
-              pm2 start ecosystem.config.cjs || true
-              pm2 reload ecosystem.config.cjs
-              pm2 save
-              pm2 status
-            else
-              echo "Missing backend/ecosystem.config.cjs — please add it."
-              exit 1
-            fi
-          else
-            echo "PM2 not found on runner. Install with: npm i -g pm2"
+          if ! command -v pm2 &> /dev/null; then
+            echo "❌ PM2 not found on runner. Install it: npm i -g pm2"
             exit 1
           fi
+
+          if [ ! -f ecosystem.config.cjs ]; then
+            echo "❌ Missing backend/ecosystem.config.cjs — required to deploy."
+            exit 1
+          fi
+
+          echo "🔁 Starting or reloading PM2 processes..."
+          pm2 start ecosystem.config.cjs || true
+          pm2 reload ecosystem.config.cjs
+          pm2 save
+          pm2 status
