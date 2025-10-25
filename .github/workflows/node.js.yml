@@ -1,0 +1,112 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: ["deploy"]
+    paths:
+      - "backend/**"
+  pull_request:
+    branches: ["deploy"]
+    paths:
+      - "backend/**"
+  workflow_dispatch:
+
+# Prevent overlapping runs on the same branch
+concurrency:
+  group: backend-cicd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: self-hosted
+    # If your self-hosted runner uses extra labels, match them, e.g.:
+    # runs-on: [self-hosted, linux, x64]
+
+    env:
+      PROPENU_ENV: ${{ secrets.PROPENU_ENV }}
+
+    defaults:
+      run:
+        shell: bash
+
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/gateway/package-lock.json
+            backend/services/*-service/package-lock.json
+
+      - name: Debug lockfiles (optional)
+        run: |
+          echo "Lockfiles the runner sees:"
+          find . -name package-lock.json -maxdepth 5 -print
+
+      # ====== GATEWAY ======
+      - name: Install gateway deps (with dev for build)
+        working-directory: backend/gateway
+        run: npm ci --no-audit --no-fund
+
+      - name: Create gateway .env (if provided)
+        if: ${{ env.PROPENU_ENV != '' }}
+        working-directory: backend/gateway
+        run: printf "%s" "${PROPENU_ENV}" > .env
+
+      - name: Build gateway (if script exists)
+        working-directory: backend/gateway
+        run: |
+          if npm run | grep -qE '(^|\s)build(\s|:)'; then
+            npm run build
+          else
+            echo "No build script"
+          fi
+
+      - name: Prune gateway dev deps (optional)
+        working-directory: backend/gateway
+        run: npm prune --omit=dev
+
+      # ====== SERVICES ======
+      - name: Install service deps (with dev for build)
+        run: |
+          shopt -s nullglob
+          for dir in backend/services/*-service; do
+            if [ -f "$dir/package.json" ]; then
+              echo "Installing deps in $dir"
+              (cd "$dir" && npm ci --no-audit --no-fund)
+            fi
+          done
+
+      - name: Build services (if build script exists)
+        run: |
+          shopt -s nullglob
+          for dir in backend/services/*-service; do
+            if [ -f "$dir/package.json" ]; then
+              if (cd "$dir" && npm run | grep -qE '(^|\s)build(\s|:)'); then
+                echo "Building $dir"
+                (cd "$dir" && npm run build)
+              else
+                echo "No build script in $dir"
+              fi
+            fi
+          done
+
+      - name: Prune service dev deps (optional)
+        run: |
+          shopt -s nullglob
+          for dir in backend/services/*-service; do
+            if [ -f "$dir/package.json" ]; then
+              (cd "$dir" && npm prune --omit=dev)
+            fi
+          done
