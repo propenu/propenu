@@ -11,7 +11,6 @@ on:
       - "backend/**"
   workflow_dispatch:
 
-# Prevent overlapping deploy runs
 concurrency:
   group: backend-cicd-${{ github.ref }}
   cancel-in-progress: true
@@ -21,9 +20,7 @@ jobs:
     runs-on: self-hosted
 
     env:
-      # Gateway env
       PRPPENU_GATEWAY_ENV: ${{ secrets.PRPPENU_GATEWAY_ENV }}
-      # Service envs (stored in GitHub Secrets)
       PRPPENU_AUTH_ENV: ${{ secrets.PRPPENU_AUTH_ENV }}
       PRPPENU_PAYMENT_ENV: ${{ secrets.PRPPENU_PAYMENT_ENV }}
       PRPPENU_PROPERTY_ENV: ${{ secrets.PRPPENU_PROPERTY_ENV }}
@@ -38,7 +35,6 @@ jobs:
         node-version: [18.x]
 
     steps:
-      # ----------------- 📥 Checkout -----------------
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -54,43 +50,53 @@ jobs:
             backend/gateway/package-lock.json
             backend/services/*-service/package-lock.json
 
-      - name: Debug working directory
+      - name: Show runner workspace & repo root
         run: |
-          echo "Current directory:"
-          pwd
-          echo "List of files:"
+          echo "GITHUB_WORKSPACE = $GITHUB_WORKSPACE"
+          echo "pwd               = $(pwd)"
+          echo "Repo tree:"
           ls -la
+          echo "Backend tree:"
+          ls -la backend || true
 
-      # ----------------- 🧪 Write .env files -----------------
-      - name: Write gateway .env from secrets
-        if: ${{ env.PRPPENU_GATEWAY_ENV != '' }}
+      - name: Secrets presence (length only, values are masked)
+        run: |
+          check() { [ -n "$2" ] && echo "$1: OK" || (echo "$1: MISSING"; exit 1); }
+          check PRPPENU_GATEWAY_ENV "${PRPPENU_GATEWAY_ENV}"
+          check PRPPENU_AUTH_ENV "${PRPPENU_AUTH_ENV}"
+          check PRPPENU_PAYMENT_ENV "${PRPPENU_PAYMENT_ENV}"
+          check PRPPENU_PROPERTY_ENV "${PRPPENU_PROPERTY_ENV}"
+          check PRPPENU_USER_ENV "${PRPPENU_USER_ENV}"
+
+      # -------- Write .env files (heredoc is robust for multi-line) --------
+      - name: Write gateway .env
         working-directory: backend/gateway
         run: |
-          echo "Creating .env for gateway"
-          printf "%s" "${PRPPENU_GATEWAY_ENV}" > .env
+          cat > .env <<'EOF'
+          ${PRPPENU_GATEWAY_ENV}
+          EOF
+          echo "gateway .env written"
 
-      - name: Write service .env files from secrets
+      - name: Write service .env files
         run: |
-          set -e
-          if [ -n "${PRPPENU_AUTH_ENV}" ]; then
-            echo "Creating .env for auth-service"
-            printf "%s" "${PRPPENU_AUTH_ENV}" > backend/services/auth-service/.env
-          fi
-          if [ -n "${PRPPENU_PAYMENT_ENV}" ]; then
-            echo "Creating .env for payment-service"
-            printf "%s" "${PRPPENU_PAYMENT_ENV}" > backend/services/payment-service/.env
-          fi
-          if [ -n "${PRPPENU_PROPERTY_ENV}" ]; then
-            echo "Creating .env for property-service"
-            printf "%s" "${PRPPENU_PROPERTY_ENV}" > backend/services/property-service/.env
-          fi
-          if [ -n "${PRPPENU_USER_ENV}" ]; then
-            echo "Creating .env for user-service"
-            printf "%s" "${PRPPENU_USER_ENV}" > backend/services/user-service/.env
-          fi
+          write_env () {
+            local content="$1"; local path="$2"
+            mkdir -p "$(dirname "$path")"
+            cat > "$path" <<'EOF'
+          '"'"'REPLACE_ME'"'"'
+          EOF
+            # Replace placeholder safely with the env content
+            # Use printf to avoid interpreting backslashes
+            printf "%s" "$content" > "$path"
+            echo "wrote $path"
+          }
+          write_env "${PRPPENU_AUTH_ENV}" backend/services/auth-service/.env
+          write_env "${PRPPENU_PAYMENT_ENV}" backend/services/payment-service/.env
+          write_env "${PRPPENU_PROPERTY_ENV}" backend/services/property-service/.env
+          write_env "${PRPPENU_USER_ENV}" backend/services/user-service/.env
 
-      # ----------------- 📦 Install & Build Gateway -----------------
-      - name: Install gateway dependencies
+      # -------- Install & Build (gateway) --------
+      - name: Install gateway deps
         working-directory: backend/gateway
         run: npm ci --no-audit --no-fund
 
@@ -100,19 +106,19 @@ jobs:
           if npm run | grep -qE '(^|\s)build(\s|:)'; then
             npm run build
           else
-            echo "⚠️ No build script found for gateway."
+            echo "No build script for gateway."
           fi
 
-      - name: Prune gateway dev dependencies
+      - name: Prune gateway dev deps
         working-directory: backend/gateway
         run: npm prune --omit=dev
 
-      # ----------------- 🧰 Install & Build Services -----------------
-      - name: Install service dependencies
+      # -------- Install & Build (services) --------
+      - name: Install service deps
         run: |
           shopt -s nullglob
           for dir in backend/services/*-service; do
-            echo "Installing dependencies in $dir"
+            echo "Installing deps in $dir"
             (cd "$dir" && npm ci --no-audit --no-fund)
           done
 
@@ -124,32 +130,33 @@ jobs:
               echo "Building $dir"
               (cd "$dir" && npm run build)
             else
-              echo "⚠️ No build script in $dir"
+              echo "No build script in $dir"
             fi
           done
 
-      - name: Prune service dev dependencies
+      - name: Prune service dev deps
         run: |
           shopt -s nullglob
           for dir in backend/services/*-service; do
             (cd "$dir" && npm prune --omit=dev)
           done
 
-      # ----------------- 🚀 Deploy with PM2 -----------------
-      - name: Reload PM2 apps
+      # -------- Deploy with PM2 from the *workspace* backend --------
+      - name: Reload PM2 apps (workspace)
         working-directory: backend
         run: |
-          if ! command -v pm2 &> /dev/null; then
-            echo "❌ PM2 not found on runner. Install it: npm i -g pm2"
+          if ! command -v pm2 >/dev/null 2>&1; then
+            echo "PM2 not found on runner. Install: npm i -g pm2"
             exit 1
           fi
 
           if [ ! -f ecosystem.config.cjs ]; then
-            echo "❌ Missing backend/ecosystem.config.cjs — required to deploy."
+            echo "Missing backend/ecosystem.config.cjs in the workspace."
+            echo "Make sure PM2 apps use relative paths (cwd) under backend/."
             exit 1
           fi
 
-          echo "🔁 Starting or reloading PM2 processes..."
+          echo "Starting/reloading PM2 from workspace backend/"
           pm2 start ecosystem.config.cjs || true
           pm2 reload ecosystem.config.cjs
           pm2 save
