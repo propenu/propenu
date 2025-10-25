@@ -5,11 +5,14 @@ on:
     branches: ["deploy"]
     paths:
       - "backend/**"
+      - "!frontend/**"  
   pull_request:
     branches: ["deploy"]
     paths:
       - "backend/**"
   workflow_dispatch:
+
+
 
 concurrency:
   group: backend-cicd-${{ github.ref }}
