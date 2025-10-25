@@ -6,8 +6,7 @@
   "main": "index.js",
   "workspaces": [
     "backend/services/*",
-    "backend/gateway",
-    "frontend/*"
+    "backend/gateway"
   ],
   "scripts": {
     "dev:gateway": "npm run dev --workspace=backend/gateway",
@@ -15,11 +14,8 @@
     "dev:user": "npm run dev --workspace=backend/services/user-service",
     "dev:property": "npm run dev --workspace=backend/services/property-service",
     "dev:payment": "npm run dev --workspace=backend/services/payment-service",
-    "dev:web": "npm run dev --workspace=frontend/web",
-    "dev:admin": "npm run dev --workspace=frontend/admin-dashboard",
     "dev:backend": "concurrently \"npm run dev:gateway\" \"npm run dev:auth\" \"npm run dev:user\" \"npm run dev:property\" \"npm run dev:payment\"",
-    "dev:frontend": "concurrently \"npm run dev:web\" \"npm run dev:admin\"",
-    "dev:all": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\""
+    "dev:all": "concurrently \"npm run dev:backend\""
   },
   "keywords": [],
   "author": "",
