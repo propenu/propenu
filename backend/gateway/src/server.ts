@@ -1,8 +1,12 @@
 import express, { NextFunction, Request, Response } from "express";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import morgan from "morgan";
+import dotenv from "dotenv";
 
+dotenv.config();
 const app = express();
+
+const PORT = process.env.PORT ?? 4000;
 
 /** ---- CORS (terminate at the gateway) ---- */
 const ALLOWED_ORIGINS = new Set([
@@ -43,10 +47,10 @@ const USER_SERVICE = "http://localhost:4004";
 function serviceProxy(target: string) {
   return createProxyMiddleware({
     target,
-    changeOrigin: true,          // updates Host header for upstream
-    xfwd: true,                  // adds X-Forwarded-* headers
-    proxyTimeout: 10_000,        // upstream stall protection
-    timeout: 15_000,             // client socket timeout
+    changeOrigin: true,          
+    xfwd: true,                  
+    proxyTimeout: 10_000,        
+    timeout: 15_000,             
     onProxyReq: (proxyReq: import("http").ClientRequest, req: Request, res: Response) => {
     },
     onError: (err: Error, req: Request, res: Response) => {
@@ -66,6 +70,6 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
-app.listen(4000, () => {
+app.listen(PORT, () => {
   console.log("Gateway running on :4000");
 });

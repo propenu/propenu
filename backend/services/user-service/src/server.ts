@@ -19,6 +19,7 @@ async function start() {
         app.use('/auth', authRoute);
 
         const port = process.env.PORT ?? 3000;
+        
         app.listen(port, () => {
             console.log(`user service is running on port ${port}`); 
         });
