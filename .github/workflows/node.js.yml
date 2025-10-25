@@ -11,19 +11,21 @@ on:
       - "backend/**"
   workflow_dispatch:
 
-# Prevent overlapping runs on the same branch
 concurrency:
   group: backend-cicd-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: self-hosted
-    # If your self-hosted runner uses extra labels, match them, e.g.:
-    # runs-on: [self-hosted, linux, x64]
-
     env:
-      PROPENU_ENV: ${{ secrets.PROPENU_ENV }}
+      # Gateway env (create this secret or rename to yours)
+      PRPPENU_GATEWAY_ENV: ${{ secrets.PRPPENU_GATEWAY_ENV }}
+      # Service envs you already created
+      PRPPENU_AUTH_ENV: ${{ secrets.PRPPENU_AUTH_ENV }}
+      PRPPENU_PAYMENT_ENV: ${{ secrets.PRPPENU_PAYMENT_ENV }}
+      PRPPENU_PROPERTY_ENV: ${{ secrets.PRPPENU_PROPERTY_ENV }}
+      PRPPENU_USER_ENV: ${{ secrets.PRPPENU_USER_ENV }}
 
     defaults:
       run:
@@ -49,20 +51,41 @@ jobs:
             backend/gateway/package-lock.json
             backend/services/*-service/package-lock.json
 
-      - name: Debug lockfiles (optional)
+      - name: Show working dir (debug)
         run: |
-          echo "Lockfiles the runner sees:"
-          find . -name package-lock.json -maxdepth 5 -print
+          pwd
+          ls -la
 
-      # ====== GATEWAY ======
+      # -------- Write .env files (from GitHub Secrets) --------
+      - name: Write gateway .env
+        if: ${{ env.PRPPENU_GATEWAY_ENV != '' }}
+        working-directory: backend/gateway
+        run: printf "%s" "${PRPPENU_GATEWAY_ENV}" > .env
+
+      - name: Write service .env files
+        run: |
+          set -e
+          # auth
+          if [ -n "${PRPPENU_AUTH_ENV}" ]; then
+            printf "%s" "${PRPPENU_AUTH_ENV}" > backend/services/auth-service/.env
+          fi
+          # payment
+          if [ -n "${PRPPENU_PAYMENT_ENV}" ]; then
+            printf "%s" "${PRPPENU_PAYMENT_ENV}" > backend/services/payment-service/.env
+          fi
+          # property
+          if [ -n "${PRPPENU_PROPERTY_ENV}" ]; then
+            printf "%s" "${PRPPENU_PROPERTY_ENV}" > backend/services/property-service/.env
+          fi
+          # user
+          if [ -n "${PRPPENU_USER_ENV}" ]; then
+            printf "%s" "${PRPPENU_USER_ENV}" > backend/services/user-service/.env
+          fi
+
+      # -------- Install & build (gateway) --------
       - name: Install gateway deps (with dev for build)
         working-directory: backend/gateway
         run: npm ci --no-audit --no-fund
-
-      - name: Create gateway .env (if provided)
-        if: ${{ env.PROPENU_ENV != '' }}
-        working-directory: backend/gateway
-        run: printf "%s" "${PROPENU_ENV}" > .env
 
       - name: Build gateway (if script exists)
         working-directory: backend/gateway
@@ -73,40 +96,55 @@ jobs:
             echo "No build script"
           fi
 
-      - name: Prune gateway dev deps (optional)
+      - name: Prune gateway dev deps
         working-directory: backend/gateway
         run: npm prune --omit=dev
 
-      # ====== SERVICES ======
+      # -------- Install & build (services) --------
       - name: Install service deps (with dev for build)
         run: |
           shopt -s nullglob
           for dir in backend/services/*-service; do
-            if [ -f "$dir/package.json" ]; then
-              echo "Installing deps in $dir"
-              (cd "$dir" && npm ci --no-audit --no-fund)
-            fi
+            echo "Installing deps in $dir"
+            (cd "$dir" && npm ci --no-audit --no-fund)
           done
 
       - name: Build services (if build script exists)
         run: |
           shopt -s nullglob
           for dir in backend/services/*-service; do
-            if [ -f "$dir/package.json" ]; then
-              if (cd "$dir" && npm run | grep -qE '(^|\s)build(\s|:)'); then
-                echo "Building $dir"
-                (cd "$dir" && npm run build)
-              else
-                echo "No build script in $dir"
-              fi
+            if (cd "$dir" && npm run | grep -qE '(^|\s)build(\s|:)'); then
+              echo "Building $dir"
+              (cd "$dir" && npm run build)
+            else
+              echo "No build script in $dir"
             fi
           done
 
-      - name: Prune service dev deps (optional)
+      - name: Prune service dev deps
         run: |
           shopt -s nullglob
           for dir in backend/services/*-service; do
-            if [ -f "$dir/package.json" ]; then
-              (cd "$dir" && npm prune --omit=dev)
-            fi
+            (cd "$dir" && npm prune --omit=dev)
           done
+
+      # -------- Deploy: reload PM2 --------
+      - name: Reload PM2 apps
+        working-directory: backend
+        run: |
+          # ecosystem.config.cjs should define gateway + all services
+          if pm2 -v >/dev/null 2>&1; then
+            # Start or reload based on ecosystem file
+            if [ -f ecosystem.config.cjs ]; then
+              pm2 start ecosystem.config.cjs || true
+              pm2 reload ecosystem.config.cjs
+              pm2 save
+              pm2 status
+            else
+              echo "Missing backend/ecosystem.config.cjs — please add it."
+              exit 1
+            fi
+          else
+            echo "PM2 not found on runner. Install with: npm i -g pm2"
+            exit 1
+          fi
