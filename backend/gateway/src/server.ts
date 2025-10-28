@@ -71,5 +71,5 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
 app.listen(PORT, () => {
-  console.log("Gateway running on :4000");
+  console.log(`Gateway running on : ${PORT}`);
 });

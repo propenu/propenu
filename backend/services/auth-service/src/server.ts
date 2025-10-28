@@ -13,5 +13,5 @@ app.get('/api/auth', (req, res) => {
 })
 
 app.listen(PORT, () => {
-    console.log('auth service is running on port 4001');
+    console.log(`auth service is running on port ${PORT}`);
 })

@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const PORT = process.env.PORT ?? 4000;
+const PORT = process.env.PORT ?? 4002;
 
 const app = express();
 
@@ -12,5 +12,5 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log('Payment service is running on port 4002');
+  console.log(`Payment service is running on port ${PORT}`);
 });
