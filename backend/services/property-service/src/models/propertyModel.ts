@@ -1,24 +1,48 @@
-import mongoose, { Schema, Types, Model, models } from "mongoose";
+import mongoose, { Schema, Types, Model, models, Document } from "mongoose";
+import {
+  Address,
+  Amenities,
+  Created,
+  Image,
+  ListingType,
+  PropertyBase,
+  PropertyCategory,
+  PropertyCategoryT,
+  Video,
+} from "../types";
 
-/** ---------------- Enums ---------------- */
-export const ListingType = ["Rent", "Sell", "Buy"] as const;
-export const PropertyCategory = ["Residential", "Commercial", "Land/Plot", "Agricultural"] as const;
-
-type ListingTypeT = (typeof ListingType)[number];
-type PropertyCategoryT = (typeof PropertyCategory)[number];
-
-/** ---------------- Subdocs ---------------- */
-const addressSchema = new Schema(
+/* --------------------------- Sub-Schemas --------------------------- */
+const imageSchema = new Schema<Image>(
   {
-    addressLine: String,
-    nearbyLandmarks: [String],
-    city: { type: String, index: true },
-    pincode: String,
+    url: { type: String, required: true },
+    key: { type: String, required: true },
+    alt: String,
+    size: Number,
   },
   { _id: false }
 );
 
-const amenitiesSchema = new Schema(
+const videoSchema = new Schema<Video>(
+  {
+    key: { type: String, required: true },
+    url: { type: String, required: true },
+    alt: String,
+    size: Number,
+  },
+  { _id: false }
+);
+
+const AddressSchema = new Schema<Address>(
+  {
+    addressLine: { type: String },
+    nearbyLandmarks: [{ type: String }],
+    city: { type: String, index: true },
+    pincode: { type: String },
+  },
+  { _id: false }
+);
+
+const AmenitiesSchema = new Schema<Amenities>(
   {
     waterSupply: Boolean,
     powerBackup: Boolean,
@@ -27,210 +51,110 @@ const amenitiesSchema = new Schema(
     gym: Boolean,
     swimmingPool: Boolean,
     clubhouse: Boolean,
-    sportsCourts: Boolean,
     lift: Boolean,
-    garden: Boolean,
-    childrensPlayArea: Boolean,
-    joggingTrack: Boolean,
   },
   { _id: false }
 );
 
-/** ---------------- Base Document Types ---------------- */
-export interface PropertyBase {
-  title: string;
-  description?: string;
-  userId?: Types.ObjectId;
-  listingType: ListingTypeT; // Rent/Sell/Buy
-  category: PropertyCategoryT;
-  price?: number;
-  facing?: string;
-  area?: number;
-  isVerified?: boolean;
-  verificationStatus?: "pending" | "approved" | "rejected";
-  verifiedBy?: Types.ObjectId | null;
-  verifiedAt?: Date | null;
-  address?: {
-    addressLine?: string;
-    nearbyLandmarks?: string[];
-    city?: string;
-    pincode?: string;
-  };
-  amenities?: Record<string, any>;
-  images?: string[];
-  videos?: string[];
-  listedDate?: Date;
-}
-
-/** ---------------- Discriminator Detail Types ---------------- */
-export interface ResidentialDetails {
-  details?: {
-    bhk?: number;
-    bathrooms?: number;
-    balconies?: number;
-    furnishing?: "Unfurnished" | "Semi" | "Fully";
-    floorNumber?: number;
-    totalFloors?: number;
-  };
-}
-
-export interface CommercialDetails {
-  details?: {
-    propertyType?: string; // Office, Shop, Warehouse, etc.
-    floor?: number;
-    totalFloors?: number;
-    furnishedStatus?: string;
-    powerBackup?: boolean;
-    lift?: boolean;
-    washrooms?: number;
-    ceilingHeightFt?: number;
-    builtYear?: number;
-    maintenanceCharges?: number;
-  };
-}
-
-export interface LandPlotDetails {
-  details?: {
-    roadWidthFt?: number;
-    negotiable?: boolean;
-    readyToConstruct?: boolean;
-    waterConnection?: boolean;
-    electricityConnection?: boolean;
-    approvedByAuthority?: string;
-  };
-}
-
-export interface AgriculturalDetails {
-  details?: {
-    boundaryWall?: boolean;
-    areaUnit?: string;
-    landShape?: string;
-    soilType?: string;
-    irrigationType?: string;
-    currentCrop?: string;
-    suitableFor?: string[];
-    plantationAge?: number;
-    numberOfBorewells?: number;
-    electricityConnection?: boolean;
-  };
-}
-
-/** ---------------- Base Schema w/ discriminatorKey ---------------- */
-const baseOptions = { discriminatorKey: "category", timestamps: true };
-
-const PropertySchema = new Schema<PropertyBase>(
+const creadedSchema =  new Schema<Created>(
   {
-    title: { type: String, required: true },
-    description: String,
-    userId: { type: Types.ObjectId, ref: "User", index: true },
+             
+  },
+  {_id : false}
+)
 
-    listingType: { type: String, enum: ListingType, index: true },
-    category: { type: String, enum: PropertyCategory, index: true },
+/* --------------------------- Interface Fix --------------------------- */
+// ✅ This interface merges PropertyBase + Mongoose Document
+export interface PropertyDocument extends PropertyBase, Document {
+  _id: Types.ObjectId; // all Mongo docs have this
+  images: Image[];
+  videos: Video[];
+}
 
+/* --------------------------- Main Schema --------------------------- */
+const PropertySchema = new Schema<PropertyDocument>(
+  {
+    title: { type: String, required: true, index: true },
+    description: { type: String },
+    listingType: {
+      type: String,
+      enum: ListingType,
+      index: true,
+      required: true,
+    },
+    category: {
+      type: String,
+      enum: PropertyCategory,
+      index: true,
+      required: true,
+    },
     price: { type: Number, index: true },
-    facing: String,
-    area: Number,
-
+    facing: { type: String },
+    area: { type: Number },
     isVerified: { type: Boolean, default: false, index: true },
     verificationStatus: {
       type: String,
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
-    verifiedBy: { type: Types.ObjectId, ref: "User" },
-    verifiedAt: Date,
-
-    address: addressSchema,
-    amenities: amenitiesSchema,
-
-    images: [{ type: String }],
-    videos: [{ type: String }],
-
+    status:{type: String, enum:["draft", "published", "archived"] },
+    verifiedBy: { type: Types.ObjectId, ref: "User", default: null },
+    verifiedAt: { type: Date, default: null },
+    address: AddressSchema,
+    amenities: AmenitiesSchema,
+    images: { type: [imageSchema], default: [] },
+    videos: { type: [videoSchema], default: [] },
     listedDate: { type: Date, default: () => new Date(), index: true },
+    details: { type: Schema.Types.Mixed },
+
+
+  createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  createdByRole: { type: String, enum: ['builder','agent','seller','admin'] },
+  builder: { type: Schema.Types.ObjectId, ref: 'Builder', default: null },
+  agent: { type: Schema.Types.ObjectId, ref: 'Agent', default: null },
+  seller: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+
   },
-  baseOptions
+  { timestamps: true }
 );
 
-/** Correct way to add a text index for search */
-PropertySchema.index({ title: "text", description: "text" });
+/* --------------------------- Model Export --------------------------- */
+// ✅ Now TypeScript knows propertyModel returns PropertyDocument
+export const propertyModel: Model<PropertyDocument> =
+  (models.Property as Model<PropertyDocument>) ||
+  mongoose.model<PropertyDocument>("Property", PropertySchema);
 
-/** Stable model (avoids OverwriteModelError in dev/hot-reload) */
-export const Property =
-  (models.Property as Model<PropertyBase>) ||
-  mongoose.model<PropertyBase>("Property", PropertySchema);
-
-/** ---------------- Discriminators ---------------- */
-function getOrCreateDiscriminator<T>(
-  name: PropertyCategoryT,
-  def: Record<string, any>
+/* --------------------------- Utilities --------------------------- */
+export function validateDetailsByCategory(
+  category: PropertyCategoryT,
+  details: Record<string, any>
 ) {
-  // If already created (e.g., hot reload), return it
-  if (Property.discriminators && Property.discriminators[name]) {
-    return Property.discriminators[name] as Model<PropertyBase & T>;
+  if (!details) return { valid: true };
+  switch (category) {
+    case "Residential":
+      if (typeof details.bhk === "number" || typeof details.bathrooms === "number")
+        return { valid: true };
+      return { valid: false, message: "Residential details should include bhk or bathrooms" };
+    case "Commercial":
+      if (details.propertyType || typeof details.floor === "number")
+        return { valid: true };
+      return { valid: false, message: "Commercial details should include propertyType or floor" };
+    case "LandPlot":
+      return { valid: true };
+    case "Agricultural":
+      return { valid: true };
+    default:
+      return { valid: true };
   }
-  return Property.discriminator<PropertyBase & T>(name, new Schema(def));
 }
 
-// Residential
-export const Residential = getOrCreateDiscriminator<ResidentialDetails>("Residential", {
-  details: {
-    bhk: Number,
-    bathrooms: Number,
-    balconies: Number,
-    furnishing: { type: String, enum: ["Unfurnished", "Semi", "Fully"] },
-    floorNumber: Number,
-    totalFloors: Number,
-  },
-});
-
-// Commercial
-export const Commercial = getOrCreateDiscriminator<CommercialDetails>("Commercial", {
-  details: {
-    propertyType: String,
-    floor: Number,
-    totalFloors: Number,
-    furnishedStatus: String,
-    powerBackup: Boolean,
-    lift: Boolean,
-    washrooms: Number,
-    ceilingHeightFt: Number,
-    builtYear: Number,
-    maintenanceCharges: Number,
-  },
-});
-
-// Land/Plot
-export const LandPlot = getOrCreateDiscriminator<LandPlotDetails>("Land/Plot", {
-  details: {
-    roadWidthFt: Number,
-    negotiable: Boolean,
-    readyToConstruct: Boolean,
-    waterConnection: Boolean,
-    electricityConnection: Boolean,
-    approvedByAuthority: String,
-  },
-});
-
-// Agricultural
-export const Agricultural = getOrCreateDiscriminator<AgriculturalDetails>("Agricultural", {
-  details: {
-    boundaryWall: Boolean,
-    areaUnit: String,
-    landShape: String,
-    soilType: String,
-    irrigationType: String,
-    currentCrop: String,
-    suitableFor: [String],
-    plantationAge: Number,
-    numberOfBorewells: Number,
-    electricityConnection: Boolean,
-  },
-});
-
-/** ---------------- Optional helper to ensure key indexes at boot ---------------- */
 export async function ensurePropertyIndexes() {
-  await Property.collection.createIndex({ "address.city": 1, category: 1, listingType: 1 });
-  await Property.collection.createIndex({ price: 1 });
-  await Property.collection.createIndex({ listedDate: -1 });
-  await Property.collection.createIndex({ isVerified: 1 });
+  await propertyModel.collection.createIndex({
+    "address.city": 1,
+    category: 1,
+    listingType: 1,
+  });
+  await propertyModel.collection.createIndex({ price: 1 });
+  await propertyModel.collection.createIndex({ listedDate: -1 });
+  await propertyModel.collection.createIndex({ isVerified: 1 });
 }

@@ -2,6 +2,8 @@ import express from 'express';
 import authRoute from './routes/authRoute';
 import dotenv from 'dotenv';
 import { connectDB } from './config/db';
+import agentRoute from './routes/agentRoute';
+import builderRouter from './routes/builderRoute';
 
 dotenv.config();
 
@@ -20,7 +22,8 @@ async function start() {
         });
 
         app.use('/auth', authRoute);
-
+        app.use("/agent", agentRoute);
+        app.use("/builder", builderRouter);
         
         app.listen(port, () => {
             console.log(`user service is running on port ${port}`); 

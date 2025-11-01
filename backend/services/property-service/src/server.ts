@@ -1,29 +1,22 @@
 import  express  from "express";
 import dotenv from "dotenv";
 import { connectDB } from "./config/db";
-import propertyRoute from "./routes/propertyRoute";
-import  mediaRoutes from "./routes/mediaRoute"
+import PropertiesRoute from "./routes/propertiesRoute";
 
 dotenv.config();
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const port = process.env.PORT ?? 4003;
 
-
 async function start() {
     try {
-        await connectDB();
-
+        await connectDB(); 
         app.get("/", (req, res) => {
-           res.json({ message: "User Service is running" });
+           res.json({ message: "Property Service is running" });
         });
-
-        app.use('/property', propertyRoute);
-
-        app.use("/api/media", mediaRoutes);
-
-        
+        app.use('/property', PropertiesRoute);
         app.listen(port, () => {
             console.log(`property service is running on port ${port}`); 
         });
@@ -34,4 +27,3 @@ async function start() {
 }
 
 start();
-

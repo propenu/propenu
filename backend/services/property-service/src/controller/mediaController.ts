@@ -1,63 +1,56 @@
-// controllers/media.controller.ts
+// src/controllers/propertyController.ts
 import { Request, Response } from "express";
-import { uploadImageToS3AndSaveDoc, deleteImageFromS3AndDb } from "../services/mediaService";
+import { uploadBufferToS3 } from "../services/mediaService";
+import { propertyModel } from "../models/propertyModel";
 
-export async function uploadImageController(req: Request, res: Response) {
+export async function createProperty(req: Request, res: Response) {
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No file uploaded. Field name must be 'image'." });
+    // Expect multipart/form-data
+    const { title, description, price, category, listingType, details } = req.body;
+    if (!title || !category || !listingType) {
+      return res.status(400).json({ message: "title, category and listingType are required" });
     }
 
-    const { propertyId, alt } = req.body as { propertyId?: string; alt?: string };
-
-    if (!propertyId) {
-      return res.status(400).json({ message: "propertyId is required" });
+    let parsedDetails: Record<string, any> = {};
+    if (details) {
+      try {
+        parsedDetails = typeof details === "string" ? JSON.parse(details) : details;
+      } catch {
+        parsedDetails = {};
+      }
     }
 
-    // With exactOptionalPropertyTypes, omit `alt` if it's undefined/empty.
-    const args: Parameters<typeof uploadImageToS3AndSaveDoc>[0] = {
-      propertyId,
-      file: req.file, // <-- Express.Multer.File
-      ...(typeof alt === "string" && alt.trim() !== "" ? { alt } : {}),
-    };
-
-    const image = await uploadImageToS3AndSaveDoc(args);
-
-    return res.status(201).json({
-      message: "Image uploaded",
-      data: {
-        _id: image._id,
-        propertyId: image.propertyId,
-        url: image.url,
-        key: image.key,
-        alt: image.alt,
-        size: image.size,
-        createdAt: image.createdAt,
-      },
+    const prop = await propertyModel.create({
+      title,
+      description,
+      price: price ? Number(price) : undefined,
+      category,
+      listingType,
+      details: parsedDetails,
+      // userId: req.user?._id  // add auth later
     });
+
+    // If file present, upload to S3 and push into images array in the same Property doc
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (file) {
+      const { key, url } = await uploadBufferToS3({
+        buffer: file.buffer,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        propertyId: prop._id!.toString(),
+      });
+
+      prop.images = prop.images || [];
+      prop.images.push({ url, key, alt: file.originalname, size: file.size } as any);
+      await prop.save();
+    }
+
+    return res.status(201).json(prop);
   } catch (err: any) {
-    if (err?.name === "MulterError") {
+    console.error(err);
+    if (err.message && err.message.includes("Only image files")) {
       return res.status(400).json({ message: err.message });
     }
-    if (err?.code === "LIMIT_FILE_SIZE") {
-      return res.status(413).json({ message: "Image too large (max 5MB)." });
-    }
-    return res.status(500).json({ message: "Upload failed", error: err?.message });
-  }
-}
-
-export async function deleteImageController(req: Request, res: Response) {
-  try {
-    const  id  = req.params.id;
-
-       if (!id) {
-      return res.status(400).json({ message: "Missing image id" });
-    }
-    
-    const ok = await deleteImageFromS3AndDb(id);
-    if (!ok) return res.status(404).json({ message: "Image not found" });
-    return res.json({ message: "Image deleted" });
-  } catch (err: any) {
-    return res.status(500).json({ message: "Delete failed", error: err?.message });
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 }
